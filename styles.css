@@ -219,7 +219,7 @@ input, textarea { font-size: 16px; }
   display: flex; flex-direction: column; box-shadow: 0 -10px 30px rgba(0, 0, 0, .5);
 }
 .panel .grab { width: 38px; height: 5px; border-radius: 3px; background: rgba(235, 235, 245, .3); margin: 8px auto 10px; flex: none; }
-.panel .scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(var(--sab) + 24px); }
+.panel .scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 16px; }
 
 /* ---------- toast */
 .toast-wrap { position: fixed; left: 16px; right: 16px; z-index: 40; pointer-events: none; display: flex; justify-content: center; }
@@ -294,13 +294,14 @@ textarea.note { width: 100%; border: 0; border-radius: 20px; background: rgba(25
 }
 
 /* ---------- scan confirm card, bottom bar, capture flash */
-.panel .scroll { padding-bottom: calc(var(--sab) + 90px); }
 .scan-foot {
-  position: absolute; z-index: 6; left: 0; right: 0; bottom: 0;
-  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(var(--sab) + 12px) max(20px, env(safe-area-inset-left, 0px));
+  position: relative; z-index: 6; flex: none;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(var(--sab) + 10px) max(20px, env(safe-area-inset-left, 0px));
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: linear-gradient(rgba(24, 26, 35, 0), var(--card) 45%);
+  background: var(--card); border-top: 1px solid var(--line);
 }
+/* lists are controls, not text: no select or copy popup on long press */
+.panel, .swipe, .row, .card, .confirm, .scan-foot, .tabbar { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .foot-btn {
   height: 50px; padding: 0 16px 0 20px; border-radius: 25px; border: 0;
   background: rgba(var(--accent-rgb), .16); color: var(--accent);

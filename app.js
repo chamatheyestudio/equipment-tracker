@@ -29,7 +29,7 @@
     view: 'home', tab: 'home', sid: null,
     stack: [],
     sheet: null,
-    signin: { email: store.get('lastEmail', ''), step: 'email', busy: false, err: '' },
+    signin: (function () { var p = store.get('signinStep', null); var fresh = p && Date.now() - p.at < 10 * 60e3; return { email: fresh ? p.email : store.get('lastEmail', ''), step: fresh ? 'code' : 'email', busy: false, err: '' }; })(),
     form: null,
     filters: { items: 'all', q: '', history: 'all' },
     zoom: 1, torch: false,
@@ -470,9 +470,9 @@
         '<form data-form="code" style="margin-top:30px" class="otp"><label for="otp" class="sr">Sign in code</label>' +
         '<input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" autocapitalize="none" autocorrect="off" enterkeyhint="go"></form>' +
         (si.err ? '<p class="err">' + esc(si.err) + '</p>' : '') +
-        '<p class="muted" style="margin:22px 0 0">The code works for 10 minutes.</p>' +
+        '<p class="muted small" style="margin:22px auto 0;max-width:290px">On iPhone the code shows above the keyboard, tap it. The code works for 10 minutes.</p>' +
         '<button class="pill press" data-act="si-resend" style="margin-top:12px">Send a new code</button></div>' +
-        '<div style="margin-top:auto;padding-top:24px"><p class="muted small" style="text-align:center;margin:0 0 12px">You stay signed in for 90 days on this phone.</p>' +
+        '<div style="margin-top:auto;padding-top:24px"><p class="muted small" style="text-align:center;margin:0 0 12px">You stay signed in for a year on this phone.</p>' +
         '<button class="cta press" data-act="si-verify" ' + (si.busy ? 'disabled' : '') + '>' + (si.busy ? '<span class="spinner" style="border-top-color:var(--bg)"></span>' : 'Sign in') + '</button></div></div>';
     }
     var local = (si.email || '').split('@')[0];
@@ -508,7 +508,7 @@
     call('requestCode', { email: v }).then(function (j) {
       si.busy = false;
       if (!j.ok) { si.err = j.error; render(); return; }
-      si.email = j.email; store.set('lastEmail', j.email); si.step = 'code'; render();
+      si.email = j.email; store.set('lastEmail', j.email); si.step = 'code'; store.set('signinStep', { email: j.email, at: Date.now() }); render();
     }).catch(function () { si.busy = false; si.err = 'No connection. Check your signal and try again.'; render(); });
   }
   function verify(code) {
@@ -518,7 +518,7 @@
     call('verifyCode', { email: si.email, code: code }).then(function (j) {
       si.busy = false;
       if (!j.ok) { si.err = j.error; render(); return; }
-      S.token = j.token; store.set('token', j.token);
+      S.token = j.token; store.set('token', j.token); store.del('signinStep');
       S.me = j.me; store.set('me', j.me);
       si.step = 'email';
       S.view = 'home'; S.tab = 'home';
@@ -843,6 +843,7 @@
       over.addEventListener('pointerup', end); over.addEventListener('pointercancel', end);
     });
   }
+  document.addEventListener('contextmenu', function (e) { if (e.target.closest('.swipe, .panel, .row, .card')) e.preventDefault(); });
   function askRemove(code) {
     var it = item(S.model, code) || {};
     vib(20);
@@ -1158,7 +1159,7 @@
       case 'confirm-skip':
         if (S.sheet && S.sheet.code) Cam.seen[S.sheet.code] = Date.now();
         S.sheet = null; renderSheet(); break;
-      case 'si-back': S.signin.step = 'email'; S.signin.err = ''; render(); break;
+      case 'si-back': S.signin.step = 'email'; S.signin.err = ''; store.del('signinStep'); render(); break;
       case 'si-resend': sendCode(S.signin.email); break;
       case 'si-verify': verify(($('#otp') || {}).value); break;
       case 'open': {

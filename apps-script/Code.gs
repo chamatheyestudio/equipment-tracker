@@ -9,7 +9,7 @@ var ORIGINAL_SHEET = '1DanwYhNexdTwyrodSTkhnVmiVQyrAP11azCw1UIWQC0';
 var MAIN_FOLDER = '1Y8n0HlHOxmAzCgtJyEXbIfEYfwCJtqw4';
 var DOMAIN = 'eyestudio.ae';
 var ADMIN_EMAIL = 'chamath@eyestudio.ae';
-var TOKEN_DAYS = 90;
+var TOKEN_DAYS = 365;
 var REMIND_AFTER_HOURS = 24;
 
 var COLS = {
