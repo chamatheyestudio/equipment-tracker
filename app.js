@@ -432,8 +432,8 @@
     if (si.step === 'code') {
       return '<div class="view glow" style="display:flex;flex-direction:column">' +
         '<div class="topbar"><button class="circ glass press" data-act="si-back" aria-label="Back">' + ic('back', 20) + '</button><span></span></div>' +
-        '<div style="text-align:center;margin-top:40px"><h1 class="title" style="font-size:30px">Check your email</h1>' +
-        '<p class="muted" style="font-size:17px;margin:10px 0 0">We sent a 6 digit code to<br><b style="color:var(--text)">' + esc(si.email) + '</b></p>' +
+        '<div style="text-align:center;margin-top:40px"><h1 class="title" style="font-size:26px">Check your email</h1>' +
+        '<p class="muted" style="font-size:15px;margin:10px 0 0">We sent a 6 digit code to<br><b style="color:var(--text)">' + esc(si.email) + '</b></p>' +
         '<form data-form="code" style="margin-top:30px" class="otp"><label for="otp" class="sr">Sign in code</label>' +
         '<input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" autocapitalize="none" autocorrect="off" enterkeyhint="go"></form>' +
         (si.err ? '<p class="err">' + esc(si.err) + '</p>' : '') +
@@ -447,7 +447,7 @@
       '<div style="text-align:center;margin-top:12vh">' +
       '<div style="width:96px;height:96px;border-radius:24px;background:var(--pack);color:var(--bg);display:flex;align-items:center;justify-content:center;margin:0 auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 20px 50px rgba(var(--pack-rgb),.25)">' + ic('scan', 48, 2) + '</div>' +
       '<p class="muted" style="margin:26px 0 0;font-weight:600">EyeStudio</p><h1 class="title" style="margin-top:4px">Equipment Tracker</h1>' +
-      '<p class="muted" style="font-size:17px;margin:12px auto 0;max-width:300px">Scan gear out before the shoot. Check it back before you leave.</p></div>' +
+      '<p class="muted" style="font-size:15px;margin:12px auto 0;max-width:300px">Scan gear out before the shoot. Check it back before you leave.</p></div>' +
       '<form data-form="email" style="margin-top:auto;padding-top:30px;display:flex;flex-direction:column;gap:12px">' +
       '<label for="em" class="muted" style="font-weight:600;padding-left:4px">Work email</label>' +
       '<div class="field"><input id="em" type="text" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="send" placeholder="yourname" value="' + esc(local) + '"><span class="muted">@eyestudio.ae</span></div>' +
@@ -552,7 +552,7 @@
     else { chipx = chip('Out', 'y'); meta = 'Shoot ' + fmtDate(s.shootDate) + ' · ' + plural(c.packed, 'item'); action = 'Check gear back'; }
     return '<button class="card press' + (s.overdue ? ' alert' : '') + '" data-act="open" data-sid="' + esc(s.id) + '">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' + chipx + '<span class="muted small" style="display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(team) + ic('chev', 14) + '</span></div>' +
-      '<p style="margin:10px 0 0;font-size:19px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(meta) + '</p>' + bar +
+      '<p style="margin:10px 0 0;font-size:17px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(meta) + '</p>' + bar +
       (action ? '<span class="pill" style="margin-top:12px;height:40px">' + action + '</span>' : '') + '</button>';
   }
 
@@ -565,8 +565,8 @@
       var c = counts(s), out = sortCodes(Object.keys(s.packed).filter(function (k) { return !s.back[k]; }));
       var chipx = s.overdue ? chip('Overdue · ' + plural(daysSince(s.packedAt || s.created), 'day'), 'red') : s.phase === 'Packing' ? chip('Packing', 'y') : s.phase === 'Checking' ? chip('Checking back', 'v') : chip('Out since ' + fmtDate(s.packedAt || s.created), 'y');
       h += '<div class="card' + (s.overdue ? ' alert' : '') + '" style="padding-bottom:4px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div style="min-width:0">' + chipx +
-        '<p style="margin:10px 0 0;font-size:19px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(s.team.map(whoShort).join(', ')) + '</p></div>' +
-        '<span class="big" style="font-size:30px">' + (c.packed - c.back) + '</span></div><div style="margin:8px -18px 0">' +
+        '<p style="margin:10px 0 0;font-size:17px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(s.team.map(whoShort).join(', ')) + '</p></div>' +
+        '<span class="big" style="font-size:24px">' + (c.packed - c.back) + '</span></div><div style="margin:8px -18px 0">' +
         out.slice(0, 3).map(function (k) { var it = item(m, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span><span class="muted small">' + fmtTime(s.packed[k].at) + '</span></div>'; }).join('') +
         '<button class="row press" data-act="open-detail" data-sid="' + esc(s.id) + '" style="color:var(--pack);font-weight:600"><span style="flex:1">See all ' + (c.packed - c.back) + ' items</span>' + ic('chev', 16) + '</button></div></div>';
     });
@@ -593,7 +593,7 @@
     if (n.oos) filt.push(['oos', 'Out of service ' + n.oos]);
     var h = largeNav('Items', null, '<span data-sync>' + syncChip() + '</span>') +
       '<label style="margin-top:14px;height:44px;border-radius:22px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--fill)"><span class="muted">' + ic('search', 18) + '</span>' +
-      '<span class="sr">Search items</span><input id="q" type="search" placeholder="Search name or ID" value="' + esc(f.q) + '" autocomplete="off" autocorrect="off" style="flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:17px"></label>' +
+      '<span class="sr">Search items</span><input id="q" type="search" placeholder="Search name or ID" value="' + esc(f.q) + '" autocomplete="off" autocorrect="off" style="flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:16px"></label>' +
       '<div class="scrollx" style="margin-top:12px">' + filt.map(function (x) { return '<button class="pill press' + (f.items === x[0] ? ' solid' : '') + '" data-act="ifilter" data-f="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join('') + '</div>';
     if (!list.length) return h + '<div class="empty"><b>No items found</b>Try a different name or ID.</div>';
     var byCat = {};
@@ -626,7 +626,7 @@
       if (mo !== lastMonth) { h += '<p class="sec" style="margin-bottom:0">' + mo + '</p>'; lastMonth = mo; }
       var c = counts(s);
       var chips = c.missing || c.damaged ? chip(c.back + ' back', 'grey') + (c.missing ? chip(c.missing + ' missing', 'red') : '') + (c.damaged ? chip(c.damaged + ' damaged', 'red') : '') : chip('All ' + c.back + ' back', 'ok');
-      h += '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><p style="margin:0;font-size:18px;font-weight:650;min-width:0">' + esc(s.name) + '</p><span class="muted small">' + fmtDate(s.shootDate) + '</span></div>' +
+      h += '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><p style="margin:0;font-size:16px;font-weight:650;min-width:0">' + esc(s.name) + '</p><span class="muted small">' + fmtDate(s.shootDate) + '</span></div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + chips + '</div><div style="display:flex;gap:8px;margin-top:14px">' +
         (s.reportUrl ? '<a class="pill press" style="flex:1;justify-content:center;height:44px" href="' + esc(s.reportUrl) + '" target="_blank" rel="noopener">View report</a>' : '<button class="pill" style="flex:1;justify-content:center" disabled>Report pending</button>') +
         (c.missing || c.damaged ? '<button class="pill press" style="flex:1;justify-content:center" data-act="resend" data-sid="' + esc(s.id) + '">Resend report</button>'
@@ -684,7 +684,7 @@
     var chipx = s.overdue ? chip('Overdue · ' + plural(daysSince(s.packedAt || s.created), 'day'), 'red') : s.phase === 'Closed' ? chip('Closed', 'grey') : s.phase === 'Checking' ? chip('Checking back', 'v') : s.phase === 'Packing' ? chip('Packing', 'y') : chip('Out · ' + plural(c.packed, 'item'), 'y');
     var h = '<div class="view"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Back">' + ic('back', 20) + '</button><span data-sync>' + syncChip() + '</span>' +
       '<button class="circ glass press" data-act="menu" aria-label="More options">' + ic('more', 20) + '</button></div>' +
-      '<div style="padding:8px 4px 0">' + chipx + '<h1 class="title" style="font-size:30px;margin-top:10px">' + esc(s.name) + '</h1>' +
+      '<div style="padding:8px 4px 0">' + chipx + '<h1 class="title" style="font-size:24px;margin-top:10px">' + esc(s.name) + '</h1>' +
       '<p class="muted" style="margin:4px 0 0">' + plural(out.length, 'item') + ' out with ' + esc(s.team.map(function (e) { return first(nameOf(e)); }).join(' and ').replace(/ and (?=.* and )/g, ', ')) + '</p></div>' +
       '<div class="group" style="margin-top:18px"><div class="row"><span class="muted" style="flex:1">Shoot</span><span>' + fmtDate(s.shootDate) + '</span></div>' +
       (s.packedAt ? '<div class="row"><span class="muted" style="flex:1">Out for</span><span' + (s.overdue ? ' style="color:var(--red)"' : '') + '>' + (daysSince(s.packedAt) ? plural(daysSince(s.packedAt), 'day') : 'Since ' + fmtTime(s.packedAt) + ' today') + (s.overdue ? ' · reminder sent' : '') + '</span></div>' : '') +
@@ -711,7 +711,7 @@
     var c = counts(s);
     return '<div class="view glow" style="display:flex;flex-direction:column;align-items:center;text-align:center">' +
       '<div style="margin-top:18vh"><span style="width:96px;height:96px;border-radius:48px;background:var(--green);color:var(--bg);display:flex;align-items:center;justify-content:center;margin:0 auto">' + ic('check', 52, 3) + '</span>' +
-      '<h1 class="title" style="margin-top:26px">All ' + c.packed + ' back</h1><p class="muted" style="font-size:17px;margin-top:8px">Nothing missing.' + (c.damaged ? ' ' + plural(c.damaged, 'item') + ' marked damaged.' : ' Nothing damaged.') + '<br>Good shoot, go rest.</p></div></div>' +
+      '<h1 class="title" style="margin-top:26px">All ' + c.packed + ' back</h1><p class="muted" style="font-size:15px;margin-top:8px">Nothing missing.' + (c.damaged ? ' ' + plural(c.damaged, 'item') + ' marked damaged.' : ' Nothing damaged.') + '<br>Good shoot, go rest.</p></div></div>' +
       '<div class="bottom-action" style="flex-direction:column"><p class="muted small" style="text-align:center;margin:0">Report goes to Chamath' + (S.model.testMode ? '' : ', with the team on CC') + '</p>' +
       '<button class="cta press" data-act="close-session">Close and send report</button></div>';
   }
@@ -750,7 +750,7 @@
     if (S.view === 'pack') {
       var codes = Object.keys(s.packed), kit = kitCodes(s), todo = sortCodes(kit.filter(function (k) { return !s.packed[k]; }));
       var tab = S.packTab === 'topack' && kit.length ? 'topack' : 'scanned';
-      h = '<div style="display:flex;align-items:center;gap:8px;padding:0 4px"><p style="margin:0;flex:1"><span class="big" style="font-size:30px">' + codes.length + '</span> <span class="muted" style="font-weight:500">scanned</span></p><span data-sync>' + syncChip() + '</span></div>';
+      h = '<div style="display:flex;align-items:center;gap:8px;padding:0 4px"><p style="margin:0;flex:1"><span class="big" style="font-size:24px">' + codes.length + '</span> <span class="muted" style="font-weight:500">scanned</span></p><span data-sync>' + syncChip() + '</span></div>';
       if (kit.length) h += '<div class="seg" style="margin:12px 0 4px"><button class="' + (tab === 'topack' ? 'on' : '') + '" data-act="ptab" data-t="topack">To pack ' + todo.length + '</button><button class="' + (tab === 'scanned' ? 'on' : '') + '" data-act="ptab" data-t="scanned">Scanned ' + codes.length + '</button></div>';
       if (tab === 'topack') {
         h += todo.length ? '<div>' + todo.map(function (k) { var it = item(S.model, k) || {}; return '<div class="row" style="padding:0 4px"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span><span class="muted small">' + esc(it.cat || '') + '</span></div>'; }).join('') + '</div>'
@@ -767,13 +767,13 @@
     } else {
       var c = counts(s), missing = sortCodes(Object.keys(s.packed).filter(function (k) { return !s.back[k]; }));
       var pct = c.packed ? Math.round(c.back / c.packed * 100) : 0;
-      h = '<div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 4px;gap:8px"><p style="margin:0"><span class="big">' + c.back + '</span> <span class="muted" style="font-size:18px;font-weight:500">of ' + c.packed + ' back</span></p>' +
+      h = '<div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 4px;gap:8px"><p style="margin:0"><span class="big">' + c.back + '</span> <span class="muted" style="font-size:15px;font-weight:500">of ' + c.packed + ' back</span></p>' +
         '<span data-sync>' + syncChip() + '</span>' + (c.missing ? '<span style="font-weight:650;color:var(--red)">' + c.missing + ' missing</span>' : '<span style="font-weight:650;color:var(--green)">All back</span>') + '</div>' +
         '<div class="bar" style="height:8px;margin:10px 4px 0"><i style="width:' + pct + '%"></i></div>';
       if (missing.length) {
         h += '<p class="sec" style="color:var(--red);margin-top:18px">Still missing · ' + missing.length + '</p><div class="group" style="background:var(--card2)">' + missing.map(function (k) {
           var it = item(S.model, k) || {};
-          return '<div class="row" style="min-height:66px"><span class="dot"></span><div class="grow"><p style="font-size:18px;font-weight:600">' + esc(it.name) + '</p><p class="sub">' + esc(k) + ' · packed by ' + esc(whoShort(s.packed[k].by)) + '</p></div></div>';
+          return '<div class="row" style="min-height:66px"><span class="dot"></span><div class="grow"><p style="font-size:16px;font-weight:600">' + esc(it.name) + '</p><p class="sub">' + esc(k) + ' · packed by ' + esc(whoShort(s.packed[k].by)) + '</p></div></div>';
         }).join('') + '</div>';
       }
       var backList = sortCodes(Object.keys(s.back)), extra = Object.keys(s.extra);
@@ -1009,7 +1009,7 @@
     if (sh.type === 'elsewhere') {
       var o = sh.other || {};
       h = '<div style="text-align:center;padding-top:10px"><span class="badge" style="background:rgba(var(--pack-rgb),.16);color:var(--pack)">' + ic('warn', 28) + '</span>' +
-        '<h2 class="h2" style="margin-top:14px;font-size:22px">' + esc(sh.label) + ' is out on another shoot</h2>' +
+        '<h2 class="h2" style="margin-top:14px">' + esc(sh.label) + ' is out on another shoot</h2>' +
         '<p class="muted" style="margin:8px 0 0">It was packed for <b style="color:var(--text)">' + esc(o.name) + '</b>' + (o.by ? ' by ' + esc(first(o.by)) : '') + (o.since ? ' on ' + fmtDate(o.since) : '') + ' and never checked back.</p></div>' +
         '<button class="cta press" style="margin-top:22px;background:var(--pack)" data-act="move">Move it to this shoot</button>' +
         '<button class="btn2 press" style="margin-top:10px" data-act="close-sheet">Skip this item</button>' +
@@ -1017,7 +1017,7 @@
     } else if (sh.type === 'done') {
       var codes = Object.keys(s.packed), kit = kitCodes(s), skipped = sortCodes(kit.filter(function (k) { return !s.packed[k]; }));
       h = sheetHead('Ready to head out?') +
-        '<p style="margin:16px 0 0;text-align:center"><span class="big" style="font-size:44px">' + codes.length + '</span> <span class="muted" style="font-size:18px">' + (codes.length === 1 ? 'item' : 'items') + ' packed</span></p>' +
+        '<p style="margin:16px 0 0;text-align:center"><span class="big" style="font-size:36px">' + codes.length + '</span> <span class="muted" style="font-size:15px">' + (codes.length === 1 ? 'item' : 'items') + ' packed</span></p>' +
         '<p class="muted small" style="text-align:center;margin:4px 0 0">' + esc(catSummary(codes)) + '</p>';
       if (skipped.length) {
         h += '<p class="sec">From the past kit, not packed · ' + skipped.length + '</p><div class="group">' + skipped.slice(0, 8).map(function (k) {
@@ -1038,14 +1038,14 @@
         '<p class="muted small" style="text-align:center;margin:12px 0 0">If you close now, missing items stay on this shoot. Scan them any day to clear them.</p>';
     } else if (sh.type === 'damaged') {
       var it2 = item(S.model, sh.code) || {};
-      h = sheetHead('Mark as damaged') + '<p style="margin:16px 4px 0;font-size:20px;font-weight:700">' + esc(sh.code + ' · ' + (it2.name || '')) + '</p>' +
+      h = sheetHead('Mark as damaged') + '<p style="margin:16px 4px 0;font-size:17px;font-weight:700">' + esc(sh.code + ' · ' + (it2.name || '')) + '</p>' +
         '<label for="dn" class="sec" style="display:block;margin-top:14px">What happened? (optional)</label>' +
         '<textarea id="dn" class="note" rows="3" placeholder="Front element scratched">' + esc(sh.note || '') + '</textarea>' +
         '<label class="pill press" style="margin-top:10px">' + ic('photo', 16) + (sh.photo ? 'Photo added' : 'Add a photo') + '<input type="file" accept="image/*" capture="environment" data-photo hidden></label>' +
         (sh.photo ? '<img src="' + sh.photo + '" alt="Damage photo" style="display:block;margin-top:10px;max-height:140px;border-radius:14px">' : '') +
         '<button class="cta red press" style="margin-top:20px" data-act="save-damaged">Mark damaged</button>';
     } else if (sh.type === 'remove') {
-      h = sheetHead('Remove item') + '<p style="margin:16px 4px 0;font-size:18px">Remove <b>' + esc(sh.label) + '</b> from this shoot?</p>' +
+      h = sheetHead('Remove item') + '<p style="margin:16px 4px 0;font-size:16px">Remove <b>' + esc(sh.label) + '</b> from this shoot?</p>' +
         '<button class="cta red press" style="margin-top:18px" data-act="remove" data-code="' + esc(sh.code) + '">Remove</button><button class="link press" data-act="close-sheet">Keep it</button>';
     } else if (sh.type === 'list') {
       h = sheetHead(sh.title) + '<div class="group" style="margin-top:12px">' + (sh.codes.length ? sh.codes.map(function (k) {
@@ -1058,7 +1058,7 @@
         (ss.phase !== 'Closed' ? '<button class="row press" data-act="snooze"><span style="flex:1">Still shooting, remind me tomorrow</span></button>' : '') +
         (S.me.isAdmin ? '<button class="row press" data-act="ask-delete" style="color:var(--red)"><span style="flex:1">Delete this session</span>' + ic('trash', 18) + '</button>' : '') + '</div>';
     } else if (sh.type === 'delete') {
-      h = sheetHead('Delete session') + '<p style="margin:16px 4px 0;font-size:17px">Delete <b>' + esc(s.name) + '</b>? All its scans are removed and every item goes back to In. This cannot be undone.</p>' +
+      h = sheetHead('Delete session') + '<p style="margin:16px 4px 0;font-size:15px">Delete <b>' + esc(s.name) + '</b>? All its scans are removed and every item goes back to In. This cannot be undone.</p>' +
         '<button class="cta red press" style="margin-top:18px" data-act="delete-session">Delete session</button><button class="link press" data-act="close-sheet">Keep it</button>';
     } else if (sh.type === 'account') {
       h = sheetHead('Account') + '<div class="group" style="margin-top:12px"><div class="row"><span class="muted" style="flex:1">Name</span><span>' + esc(S.me.name) + '</span></div>' +
