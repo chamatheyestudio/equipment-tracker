@@ -1089,9 +1089,9 @@
         '<h2 class="h2" style="margin-top:14px">' + plural(c.missing, 'item') + ' still missing</h2><p class="muted" style="margin:6px 0 0">Have one last look around before you leave.</p></div>' +
         '<div class="group" style="margin-top:16px">' + missing.slice(0, 6).map(function (k) { var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + chip('Missing', 'red') + '</div>'; }).join('') +
         dmg.slice(0, 3).map(function (k) { var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + chip('Damaged', 'red') + '</div>'; }).join('') + '</div>' +
-        '<button class="cta press" style="margin-top:18px" data-act="save-later">Save, finish at the studio</button>' +
+        '<button class="cta press" style="margin-top:18px" data-act="save-later">Save for now, finish at the office</button>' +
         '<button class="btn2 press" style="margin-top:10px" data-act="close-session">Close and send report</button>' +
-        '<p class="muted small" style="text-align:center;margin:12px 0 0">If you close now, missing items stay on this shoot. Scan them any day to clear them.</p>';
+        '<p class="muted small" style="text-align:center;margin:12px 0 0">Saving keeps this shoot open. Anyone can carry on checking later, on any phone. Close only when everything is done.</p>';
     } else if (sh.type === 'damaged') {
       var it2 = item(S.model, sh.code) || {};
       h = sheetHead('Mark as damaged') + '<p style="margin:16px 4px 0;font-size:17px;font-weight:700">' + esc(sh.code + ' · ' + (it2.name || '')) + '</p>' +
@@ -1225,7 +1225,7 @@
       }
       case 'save-later':
         S.sheet = null; S.stack = []; S.view = 'home'; S.tab = 'home'; render();
-        toast({ title: 'Saved', sub: 'Finish checking from Sessions any time', kind: 'grey' });
+        toast({ title: 'Saved', sub: 'Carry on checking from Sessions any time, on any phone', kind: 'grey' });
         break;
       case 'close-session':
         enqueue({ type: 'close', body: { sessionId: s.id } });
@@ -1272,7 +1272,12 @@
     rebuildModel();
     render();
     if (S.token) { flush(); refresh(); }
-    setInterval(function () { if (S.token && !document.hidden && !S.queue.length) refresh(); }, 20000);
+    // faster refresh while scanning so scans from other phones on the same shoot show up quickly
+    var lastRefresh = 0;
+    setInterval(function () {
+      var scanning = S.view === 'pack' || S.view === 'check';
+      if (S.token && !document.hidden && !S.queue.length && Date.now() - lastRefresh > (scanning ? 6000 : 20000)) { lastRefresh = Date.now(); refresh(); }
+    }, 2000);
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () { });
   }
   boot();
