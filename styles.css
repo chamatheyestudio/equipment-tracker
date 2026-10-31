@@ -292,3 +292,33 @@ textarea.note { width: 100%; border: 0; border-radius: 20px; background: rgba(25
 @media (min-width: 700px) {
   .view { padding-left: calc(50% - 300px); padding-right: calc(50% - 300px); }
 }
+
+/* ---------- scan confirm card, bottom bar, capture flash */
+.panel .scroll { padding-bottom: calc(var(--sab) + 90px); }
+.scan-foot {
+  position: absolute; z-index: 6; left: 0; right: 0; bottom: 0;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(var(--sab) + 12px) max(20px, env(safe-area-inset-left, 0px));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(rgba(24, 26, 35, 0), var(--card) 45%);
+}
+.foot-btn {
+  height: 50px; padding: 0 16px 0 20px; border-radius: 25px; border: 0;
+  background: rgba(var(--accent-rgb), .16); color: var(--accent);
+  font-size: 15px; font-weight: 650; display: inline-flex; align-items: center; gap: 6px;
+}
+.confirm {
+  position: fixed; z-index: 52; left: 8px; right: 8px; bottom: calc(8px + var(--sab) * .5);
+  max-width: 560px; margin: 0 auto; border-radius: 32px; padding: 14px 14px 14px 16px;
+  background: var(--sheet); animation: sheetIn .26s cubic-bezier(.2, .9, .25, 1);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+.cf-id {
+  min-width: 56px; height: 56px; padding: 0 8px; border-radius: 16px; flex: none;
+  background: rgba(var(--accent-rgb), .16); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 750; font-variant-numeric: tabular-nums;
+}
+.cf-name { margin: 0; font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.cam-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 5; }
+.cam-flash.on { animation: camflash .28s ease-out; }
+@keyframes camflash { from { opacity: .28; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cam-flash.on { animation: none; } .confirm { animation: fadeIn .15s ease-out; } }

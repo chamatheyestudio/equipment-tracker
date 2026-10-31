@@ -95,7 +95,7 @@
     if (audio) return;
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
   }
-  document.addEventListener('pointerdown', unlockAudio, { once: true });
+  document.addEventListener('pointerdown', function () { unlockAudio(); if (audio && audio.state === 'suspended') { try { audio.resume(); } catch (e) { } } });
   function tone(freq, dur, when) {
     if (!audio) return;
     try {
@@ -106,8 +106,25 @@
       o.connect(g); g.connect(audio.destination); o.start(t); o.stop(t + dur + 0.02);
     } catch (e) { }
   }
+  // iPhone Safari has no vibrate(); tapping a hidden switch control gives a system haptic (iOS 18+). Needs a real tap.
+  var hapticEl = null;
+  function haptic() {
+    if (navigator.vibrate) { vib(30); return; }
+    try {
+      if (!hapticEl) {
+        hapticEl = document.createElement('label');
+        hapticEl.setAttribute('aria-hidden', 'true');
+        hapticEl.style.cssText = 'position:fixed;left:-100px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+        var inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', ''); inp.tabIndex = -1;
+        hapticEl.appendChild(inp); document.body.appendChild(hapticEl);
+      }
+      hapticEl.click();
+    } catch (e) { }
+  }
   function feedback(kind) {
-    if (kind === 'good') { tone(1320, 0.09); vib(35); }
+    if (audio && audio.state === 'suspended') { try { audio.resume(); } catch (e) { } }
+    if (kind === 'detect') { tone(1046, 0.07); tone(1568, 0.09, 0.08); vib(45); }
+    else if (kind === 'good') { tone(1320, 0.06); }
     else if (kind === 'warn') { tone(660, 0.1); tone(660, 0.1, 0.16); vib([40, 60, 40]); }
     else if (kind === 'bad') { tone(260, 0.25); vib([90, 50, 90]); }
   }
@@ -305,23 +322,39 @@
     switch (r.result) {
       case 'unknown': feedback('bad'); toast({ title: 'Not an EyeStudio item', sub: 'This QR is not on the equipment list', kind: 'red' }); return;
       case 'oos': feedback('warn'); toast({ title: r.item.id + ' is out of service', sub: 'Not added. Ask Chamath if you need it', kind: 'warn' }); return;
-      case 'already': feedback('warn'); toast({ title: 'Already scanned', sub: r.label + ' is on this list', kind: 'grey', ms: 2000 }); return;
+      case 'already':
+        if (Cam.recent[code] && Date.now() - Cam.recent[code] < 15000) return;
+        feedback('warn'); toast({ title: 'Already scanned', sub: r.label + ' is on this list', kind: 'grey', ms: 2000 }); return;
       case 'elsewhere':
         feedback('warn');
         S.sheet = { type: 'elsewhere', code: code, label: r.label, other: r.other, sid: s.id };
         renderSheet(); return;
     }
-    feedback('good');
-    flashFrame();
-    enqueue({ type: 'scan', body: { sessionId: s.id, itemId: code, mode: mode, clientId: uid() } });
-    if (mode === 'pack') {
-      toast({ title: r.result === 'found' ? r.label + ' found' : r.item.id + ' · ' + r.item.name + ' added', sub: r.result === 'found' ? 'It was missing. Chamath gets a note' : '',
-        action: { label: 'Undo', fn: function () { enqueue({ type: 'remove', body: { sessionId: s.id, itemId: code } }); renderScanPanel(); } } });
-    } else if (r.result === 'back') {
-      toast({ title: r.item.id + ' · ' + r.item.name + ' back', action: { label: 'Mark damaged', color: 'var(--red)', fn: function () { openDamaged(s.id, code); } }, ms: 5000 });
+    // found a valid item: ask before adding, so nothing goes in by accident
+    feedback('detect');
+    flashFrame(); flashCam();
+    S.sheet = { type: 'confirm', mode: mode, code: code, result: r.result, sid: s.id, otherName: r.otherName || '' };
+    renderSheet();
+  }
+
+  function confirmScan(action) {
+    var c = S.sheet; if (!c || c.type !== 'confirm') return;
+    var s = sess(S.model, c.sid); if (!s) return;
+    var it = item(S.model, c.code) || {};
+    haptic(); feedback('good');
+    S.sheet = null; renderSheet();
+    Cam.seen[c.code] = Date.now(); Cam.recent[c.code] = Date.now();
+    enqueue({ type: 'scan', body: { sessionId: s.id, itemId: c.code, mode: c.mode, clientId: uid() } });
+    if (c.mode === 'pack') {
+      toast({ title: c.code + ' added', sub: it.name, ms: 1800 });
+    } else if (action === 'damaged') {
+      openDamaged(s.id, c.code);
+    } else if (c.result === 'back') {
+      toast({ title: c.code + ' back in', sub: it.name, ms: 1800 });
     } else {
-      toast({ title: r.item.id + ' · extra item', sub: r.otherName ? 'From ' + r.otherName + '. Marked back there too' : 'Not packed for this shoot. Marked back in', kind: 'grey', ms: 5000 });
+      toast({ title: c.code + ' marked as extra', sub: c.otherName ? 'From ' + c.otherName + '. Marked back there too' : 'Not packed for this shoot', kind: 'grey', ms: 3500 });
     }
+    S.lastScanAt = Date.now();
     renderScanPanel();
   }
 
@@ -731,11 +764,13 @@
         '<div class="cam-msg" data-cammsg hidden></div>' +
         '<div class="cam-overlay" style="top:calc(var(--sat) + 8px)"><button class="circ glass press" data-act="leave" aria-label="Leave. Progress is saved">' + ic('x', 20) + '</button>' +
         '<div class="mode glass"><span class="k">' + (pack ? 'PACKING' : 'CHECKING BACK') + '</span><span class="n">' + esc(s.name) + '</span></div>' +
-        '<button class="done-btn glass press" data-act="' + (pack ? 'done-packing' : 'finish') + '">' + (pack ? 'Done' : 'Finish') + '</button></div>' +
+        '<button class="circ glass press" data-act="torch" aria-label="Flashlight" data-torch hidden>' + ic('flash', 20) + '</button><span class="circ" data-torch-gap></span></div>' +
         '<div class="cam-overlay" style="top:calc(var(--sat) + 64px);justify-content:center"><span class="live glass" data-live><i></i>Starting camera</span></div>' +
         '<div class="cam-overlay" style="top:calc(50% + var(--sat) / 2 - ' + (pack ? 2 : 0) + 'px)"><button class="zoom-btn glass press" data-act="zoom" aria-label="Zoom in for small stickers">2x</button>' +
-        '<button class="circ glass press" data-act="torch" aria-label="Flashlight" data-torch hidden>' + ic('flash', 20) + '</button></div></div>' +
-        '<div class="panel"><div class="grab"></div><div class="scroll" data-panel></div></div></div>';
+        '</div></div>' +
+        '<div class="panel"><div class="grab"></div><div class="scroll" data-panel></div></div>' +
+        '<div class="scan-foot"><span class="muted small" data-foot-count></span><button class="foot-btn press" data-act="' + (pack ? 'done-packing' : 'finish') + '">' + (pack ? 'Done packing' : 'Finish') + ic('chev', 16, 2.4) + '</button></div>' +
+        '<div class="cam-flash" data-camflash></div></div>';
       mountedScanner = key;
       startCamera();
     }
@@ -762,7 +797,7 @@
           return '<div class="swipe" data-swipe="' + esc(k) + '"><button class="under" data-act="remove" data-code="' + esc(k) + '">' + ic('trash', 20) + 'Remove</button>' +
             '<div class="over"><div class="row" style="padding:0 20px;min-height:60px"><span class="id">' + esc(k) + '</span><div class="grow"><p>' + esc(it.name) + '</p><p class="sub">by ' + esc(whoShort(s.packed[k].by)) + ' · ' + ago(s.packed[k].at) + '</p></div></div></div></div>';
         }).join('') + '</div><p class="muted small" style="text-align:center;margin:12px 0 0">Swipe left or hold an item to remove it</p>'
-          : '<div class="empty" style="padding:28px 12px"><b>Point the camera at a sticker</b>Each scan adds the item. Keep going, the camera stays on.</div>';
+          : '<div class="empty" style="padding:28px 12px"><b>Point the camera at a sticker</b>Check the name that pops up, then tap Add. The camera stays on.</div>';
       }
     } else {
       var c = counts(s), missing = sortCodes(Object.keys(s.packed).filter(function (k) { return !s.back[k]; }));
@@ -781,6 +816,8 @@
         (extra.length ? '<button class="row press" data-act="show-extra"><div class="grow"><p>Extra items</p><p class="sub">Came back but were not packed for this shoot</p></div><span class="muted">' + extra.length + '</span>' + ic('chev', 16) + '</button>' : '') + '</div>';
     }
     el.innerHTML = h;
+    var fc = $('[data-foot-count]');
+    if (fc) { var cc = counts(s); fc.textContent = S.view === 'pack' ? plural(cc.packed, 'item') + ' packed' : cc.back + ' of ' + cc.packed + ' back'; }
     bindSwipes();
   }
 
@@ -813,7 +850,7 @@
   }
 
   /* ------------------------------------------------------------ camera */
-  var Cam = { stream: null, track: null, worker: null, detector: null, timer: null, busy: false, n: 0, seen: {}, caps: {}, hwZoom: false, wake: null, canvas: null, ctx: null, jobs: {} };
+  var Cam = { recent: {}, stream: null, track: null, worker: null, detector: null, timer: null, busy: false, n: 0, seen: {}, caps: {}, hwZoom: false, wake: null, canvas: null, ctx: null, jobs: {} };
 
   function camMsg(html) {
     var el = $('[data-cammsg]'); if (!el) return;
@@ -851,7 +888,7 @@
       Cam.caps = (Cam.track.getCapabilities && Cam.track.getCapabilities()) || {};
       if (Cam.caps.focusMode && Cam.caps.focusMode.indexOf('continuous') > -1) Cam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () { });
       Cam.hwZoom = !!(Cam.caps.zoom && Cam.caps.zoom.max >= 1.5);
-      var tb = $('[data-torch]'); if (tb) tb.hidden = !Cam.caps.torch;
+      var tb = $('[data-torch]'); if (tb) tb.hidden = !Cam.caps.torch; var tg = $('[data-torch-gap]'); if (tg) tg.hidden = !!Cam.caps.torch;
       applyZoom();
       camMsg(''); setLive('Camera on · keep scanning', true);
       S.lastScanAt = Date.now();
@@ -951,6 +988,10 @@
     Cam.seen[code] = now;
     onScan(code);
   }
+  function flashCam() {
+    var f = $('[data-camflash]'); if (!f) return;
+    f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+  }
   function flashFrame() {
     var f = $('.cam .frame'); if (!f) return;
     f.classList.add('hit'); setTimeout(function () { f.classList.remove('hit'); }, 350);
@@ -1006,6 +1047,20 @@
     var sh = S.sheet;
     if (!sh) { root.innerHTML = ''; return; }
     var s = currentSession(), h = '';
+    if (sh.type === 'confirm') {
+      var ci = item(S.model, sh.code) || {};
+      var pk = sh.mode === 'pack';
+      var lead = pk ? (sh.result === 'found' ? 'Found, it was missing' : 'Found') : (sh.result === 'back' ? 'Packed for this shoot' : (sh.otherName ? 'Extra, from ' + sh.otherName : 'Extra, not packed for this shoot'));
+      root.innerHTML = '<div class="confirm glass" role="dialog" aria-label="Confirm scanned item">' +
+        '<div style="display:flex;align-items:center;gap:12px"><span class="cf-id">' + esc(sh.code) + '</span><div style="flex:1;min-width:0"><p class="cf-name">' + esc(ci.name || '') + '</p>' +
+        '<p class="muted small" style="margin:2px 0 0">' + esc((CAT_PLURAL[ci.cat] ? ci.cat : (ci.cat || '')) + ' · ' + lead) + '</p></div>' +
+        '<button class="circ press" style="background:rgba(255,255,255,.08)" data-act="confirm-skip" aria-label="Skip this item">' + ic('x', 18) + '</button></div>' +
+        '<div style="display:flex;gap:10px;margin-top:14px">' +
+        (pk ? '<button class="cta press" data-act="confirm-add">' + ic('plus', 20, 2.4) + 'Add to this shoot</button>'
+          : '<button class="btn2 press" style="flex:0 0 38%;color:var(--red)" data-act="confirm-damaged">Damaged</button><button class="cta press" style="flex:1" data-act="confirm-add">' + ic('check', 20, 2.6) + (sh.result === 'back' ? 'Back in' : 'Mark as extra') + '</button>') +
+        '</div></div>';
+      return;
+    }
     if (sh.type === 'elsewhere') {
       var o = sh.other || {};
       h = '<div style="text-align:center;padding-top:10px"><span class="badge" style="background:rgba(var(--pack-rgb),.16);color:var(--pack)">' + ic('warn', 28) + '</span>' +
@@ -1098,6 +1153,11 @@
       case 'signout': signOut(false); break;
       case 'refresh': S.sheet = null; renderSheet(); refresh().then(function () { toast({ title: 'Up to date', kind: 'grey', ms: 1500 }); }); break;
       case 'close-sheet': S.sheet = null; renderSheet(); break;
+      case 'confirm-add': confirmScan('add'); break;
+      case 'confirm-damaged': confirmScan('damaged'); break;
+      case 'confirm-skip':
+        if (S.sheet && S.sheet.code) Cam.seen[S.sheet.code] = Date.now();
+        S.sheet = null; renderSheet(); break;
       case 'si-back': S.signin.step = 'email'; S.signin.err = ''; render(); break;
       case 'si-resend': sendCode(S.signin.email); break;
       case 'si-verify': verify(($('#otp') || {}).value); break;
