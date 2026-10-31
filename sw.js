@@ -1,6 +1,6 @@
 /* Keeps the app shell on the phone so it opens with no signal. Data calls always go to the network. */
-var CACHE = 'et-shell-v1';
-var SHELL = ['./', 'index.html', 'styles.css?v=1', 'app.js?v=1', 'config.js?v=1', 'scan-worker.js', 'vendor/jsQR.js',
+var CACHE = 'et-shell-v2';
+var SHELL = ['./', 'index.html', 'styles.css?v=2', 'app.js?v=2', 'config.js?v=2', 'scan-worker.js', 'vendor/jsQR.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {
