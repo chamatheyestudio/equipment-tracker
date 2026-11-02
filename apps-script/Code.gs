@@ -493,7 +493,7 @@ function sendReport(s, items, scans) {
   var packed = Object.keys(sum.packed);
   var missing = packed.filter(function (k) { return !sum.back[k]; });
   var html = reportHtml(s, m, sum, MAIL_DARK);
-  var printHtml = reportHtml(s, m, sum, MAIL_LIGHT, true);
+  var printHtml = reportHtml(s, m, sum, MAIL_DARK, true);
   var pdf = Utilities.newBlob(printHtml, 'text/html', 'report.html').getAs('application/pdf')
     .setName(dateOnly(s.ShootDate) + ' ' + s.ShootName + ' report.pdf');
   var file = DriveApp.getFolderById(prop('REPORTS_FOLDER')).createFile(pdf);
