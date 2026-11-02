@@ -263,8 +263,12 @@
           else s.extra[it.id] = { by: op.by, at: op.at };
           it.status = 'In'; it.session = '';
         }
+        s.typed = s.typed || {};
+        if (b.typed) { s.typed[it.id] = { by: op.by, at: op.at, reason: b.reason, step: b.mode === 'pack' ? 'packing' : 'checking back' }; if (/sticker/i.test(b.reason || '')) it.reprint = true; }
+        else it.reprint = false;
         if (s.team.indexOf(op.by) === -1) s.team.push(op.by);
         break;
+      case 'clearReprint': (m.items || []).forEach(function (x) { if (!b.ids || !b.ids.length || b.ids.indexOf(x.id) > -1) x.reprint = false; }); break;
       case 'remove':
         if (!s || !it) break;
         delete s.packed[it.id]; if (it.session === s.id) { it.status = 'In'; it.session = ''; }
@@ -335,6 +339,25 @@
     flashFrame(); flashCam();
     S.sheet = { type: 'confirm', mode: mode, code: code, result: r.result, sid: s.id, otherName: r.otherName || '' };
     renderSheet();
+  }
+
+  function saveTyped() {
+    var t = S.sheet, s = currentSession(); if (!t || !s) return;
+    t.code = norm(($('#tid') || {}).value || t.code);
+    var fail = function (msg) { t.err = msg; renderSheet(); feedback('bad'); };
+    if (!t.code) return fail('Type the ID from the item or the list.');
+    if (!t.reason) return fail('Pick a reason first.');
+    var mode = S.view === 'pack' ? 'pack' : 'check';
+    var r = localScan(mode, s, t.code);
+    if (r.result === 'unknown') return fail('No item with the ID ' + t.code + '. Check the Items tab.');
+    if (r.result === 'oos') return fail(t.code + ' is out of service.');
+    if (r.result === 'already') return fail(t.code + ' is already on this list.');
+    if (r.result === 'elsewhere') return fail(t.code + ' is out on ' + (r.other && r.other.name || 'another shoot') + '. Check it back there first.');
+    haptic(); feedback('good');
+    enqueue({ type: 'scan', body: { sessionId: s.id, itemId: t.code, mode: mode, clientId: uid(), typed: true, reason: t.reason } });
+    S.sheet = null; renderSheet();
+    toast({ title: t.code + ' typed in', sub: (r.item.name || '') + (/sticker/i.test(t.reason) ? ' \u00b7 on the reprint list' : ''), kind: 'warn', ms: 3000 });
+    renderScanPanel();
   }
 
   function confirmScan(action) {
@@ -534,10 +557,10 @@
 
   /* ---------- tabs */
   function tabbar() {
-    var tabs = [['home', 'sessions', 'Sessions'], ['out', 'out', 'Out now'], ['items', 'items', 'Items'], ['history', 'history', 'History']];
+    var tabs = [['home', 'sessions', 'Shoots'], ['out', 'out', 'Out now'], ['items', 'items', 'Items'], ['history', 'history', 'History']];
     return '<div class="fade-bottom"></div><nav class="tabbar glass" aria-label="Main">' + tabs.map(function (t) {
       return '<button class="press' + (S.tab === t[0] ? ' on" aria-current="page' : '') + '" data-act="tab" data-tab="' + t[0] + '">' + ic(t[1], 23) + t[2] + '</button>';
-    }).join('') + '</nav><button class="fab press" data-act="new" aria-label="Start a new session">' + ic('plus', 30, 2.4) + '</button>';
+    }).join('') + '</nav><button class="fab press" data-act="new" aria-label="Start a new shoot">' + ic('plus', 30, 2.4) + '</button>';
   }
   function largeNav(title, sub, right) {
     return '<div class="topbar" style="justify-content:flex-end;gap:10px">' + (right || '') + '</div>' +
@@ -555,8 +578,8 @@
     var hour = new Date().getHours();
     var hi = (hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening') + ', ' + first(S.me.name);
     var right = '<span data-sync>' + syncChip() + '</span><button class="circ glass press" data-act="account" aria-label="Account" style="font-weight:700;color:var(--pack)">' + esc(S.me.name.charAt(0)) + '</button>';
-    var h = largeNav('Sessions', hi, right) + '<div style="margin-top:16px">' + testBanner() +
-      '<div class="stats"><div class="stat"><b>' + act.length + '</b><span>Sessions open</span></div><div class="stat"><b>' + itemsOut + '</b><span>Items out</span></div>' +
+    var h = largeNav('Shoots', hi, right) + '<div style="margin-top:16px">' + testBanner() +
+      '<div class="stats"><div class="stat"><b>' + act.length + '</b><span>Shoots open</span></div><div class="stat"><b>' + itemsOut + '</b><span>Items out</span></div>' +
       '<div class="stat' + (overdue ? ' red' : '') + '"><b>' + overdue + '</b><span>Overdue</span></div></div>';
     h += '<p class="sec">Active</p>';
     if (!act.length) {
@@ -573,20 +596,28 @@
     }
     return h + '</div>';
   }
+  function dateTile(iso) {
+    var d = iso ? new Date(iso.length === 10 ? iso + 'T00:00:00' : iso) : new Date();
+    var today = todayIso() === (d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+    return '<span class="dtile' + (today ? ' today' : '') + '"><small>' + (today ? 'TODAY' : d.toLocaleDateString('en-GB', { month: 'short' }).toUpperCase()) + '</small><b>' + d.getDate() + '</b></span>';
+  }
   function sessionCard(s) {
     var c = counts(s), chipx, meta, action = '', bar = '';
     var team = s.team.map(whoShort).join(', ');
-    if (s.overdue) { chipx = chip('Overdue · ' + plural(daysSince(s.packedAt || s.created), 'day'), 'red'); meta = 'Out since ' + fmtDate(s.packedAt || s.created) + ' · ' + plural(c.packed - c.back, 'item'); action = 'Check gear back'; }
+    var started = fmtTime(s.created), out = fmtTime(s.packedAt || s.created);
+    var actKind = s.phase === 'Packing' ? 'pack' : 'ret', actIcon = s.phase === 'Packing' ? 'scan' : 'ret';
+    if (s.overdue) { chipx = chip('Overdue · ' + plural(daysSince(s.packedAt || s.created), 'day'), 'red'); meta = 'Out since ' + fmtDate(s.packedAt || s.created) + ', ' + out + ' · ' + plural(c.packed - c.back, 'item'); action = 'Check gear back'; }
     else if (s.phase === 'Packing') {
-      chipx = chip('Packing', 'y'); meta = fmtDate(s.shootDate) + ' · ' + c.packed + ' scanned'; action = 'Continue packing';
+      chipx = chip('Packing', 'y'); meta = 'Started ' + started + ' · ' + c.packed + ' scanned'; action = 'Continue packing';
       var kit = kitCodes(s).length; if (kit) bar = '<div class="bar" style="margin-top:12px"><i style="width:' + Math.min(100, Math.round(c.packed / kit * 100)) + '%"></i></div>';
     }
-    else if (s.phase === 'Checking') { chipx = chip('Checking back', 'v'); meta = c.back + ' of ' + c.packed + ' back' + (c.missing ? ' · ' + c.missing + ' missing' : ''); action = 'Continue checking'; }
-    else { chipx = chip('Out', 'y'); meta = 'Shoot ' + fmtDate(s.shootDate) + ' · ' + plural(c.packed, 'item'); action = 'Check gear back'; }
+    else if (s.phase === 'Checking') { chipx = chip('Checking back', 'v'); meta = 'Out at ' + out + ' · ' + c.back + ' of ' + c.packed + ' back' + (c.missing ? ' · ' + c.missing + ' missing' : ''); action = 'Continue checking'; }
+    else { chipx = chip('Out', 'y'); meta = 'Out at ' + out + ' · ' + plural(c.packed, 'item'); action = 'Check gear back'; }
     return '<button class="card press' + (s.overdue ? ' alert' : '') + '" data-act="open" data-sid="' + esc(s.id) + '">' +
+      '<div style="display:flex;gap:12px;align-items:flex-start">' + dateTile(s.shootDate || s.created) + '<div style="flex:1;min-width:0">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' + chipx + '<span class="muted small" style="display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + esc(team) + ic('chev', 14) + '</span></div>' +
-      '<p style="margin:10px 0 0;font-size:17px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(meta) + '</p>' + bar +
-      (action ? '<span class="pill" style="margin-top:12px;height:40px">' + action + '</span>' : '') + '</button>';
+      '<p style="margin:8px 0 0;font-size:17px;font-weight:650">' + esc(s.name) + '</p><p class="muted small" style="margin:3px 0 0">' + esc(meta) + '</p>' + bar +
+      '</div></div>' + (action ? '<span class="card-act ' + actKind + '">' + ic(actIcon, 20, 2.3) + '<span>' + action + '</span>' + ic('chev', 18, 2.4) + '</span>' : '') + '</button>';
   }
 
   function renderOut() {
@@ -615,7 +646,9 @@
     var all = m.items;
     var n = { all: all.length, In: 0, Out: 0, Missing: 0, oos: 0 };
     all.forEach(function (i) { if (i.cond === 'Out of service') n.oos++; else n[i.status] = (n[i.status] || 0) + 1; });
+    var nReprint = all.filter(function (i) { return i.reprint; }).length;
     var list = all.filter(function (i) {
+      if (f.items === 'reprint') return !!i.reprint && (!q || (i.id + ' ' + i.name).toLowerCase().indexOf(q) > -1);
       if (f.items === 'oos' && i.cond !== 'Out of service') return false;
       if (f.items !== 'all' && f.items !== 'oos' && (i.status !== f.items || i.cond === 'Out of service')) return false;
       if (q && (i.id + ' ' + i.name + ' ' + i.cat).toLowerCase().indexOf(q) === -1) return false;
@@ -624,17 +657,19 @@
     var filt = [['all', 'All ' + n.all], ['In', 'In ' + (n.In || 0)], ['Out', 'Out ' + (n.Out || 0)]];
     if (n.Missing) filt.push(['Missing', 'Missing ' + n.Missing]);
     if (n.oos) filt.push(['oos', 'Out of service ' + n.oos]);
+    if (nReprint) filt.push(['reprint', 'Reprint ' + nReprint]);
     var h = largeNav('Items', null, '<span data-sync>' + syncChip() + '</span>') +
       '<label style="margin-top:14px;height:44px;border-radius:22px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--fill)"><span class="muted">' + ic('search', 18) + '</span>' +
       '<span class="sr">Search items</span><input id="q" type="search" placeholder="Search name or ID" value="' + esc(f.q) + '" autocomplete="off" autocorrect="off" style="flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:16px"></label>' +
       '<div class="scrollx" style="margin-top:12px">' + filt.map(function (x) { return '<button class="pill press' + (f.items === x[0] ? ' solid' : '') + '" data-act="ifilter" data-f="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join('') + '</div>';
+    if (f.items === 'reprint' && list.length) h += '<p class="muted small" style="margin:14px 4px 0">These items were typed in because the sticker was lost or broken. Print new labels for them.</p>' + (S.me.isAdmin ? '<button class="btn2 press" style="margin-top:10px" data-act="clear-reprint">Mark all as reprinted</button>' : '');
     if (!list.length) return h + '<div class="empty"><b>No items found</b>Try a different name or ID.</div>';
     var byCat = {};
     list.forEach(function (i) { (byCat[i.cat || 'Miscellaneous'] = byCat[i.cat || 'Miscellaneous'] || []).push(i); });
     Object.keys(byCat).sort(function (a, b) { return catRank(a) - catRank(b); }).forEach(function (c) {
       var arr = byCat[c].sort(function (a, b) { return a.id.localeCompare(b.id, undefined, { numeric: true }); });
       h += '<p class="sec">' + esc(CAT_PLURAL[c] || c) + ' · ' + arr.length + '</p><div class="group">' + arr.map(function (i) {
-        var st = i.cond === 'Out of service' ? chip('Out of service', 'grey') : i.status === 'Out' ? chip('Out', 'y') : i.status === 'Missing' ? chip('Missing', 'red') : i.cond === 'Damaged' ? chip('Damaged', 'red') : chip('In', 'grey');
+        var st = i.reprint && f.items === 'reprint' ? chip('Reprint', 'y') : i.cond === 'Out of service' ? chip('Out of service', 'grey') : i.status === 'Out' ? chip('Out', 'y') : i.status === 'Missing' ? chip('Missing', 'red') : i.cond === 'Damaged' ? chip('Damaged', 'red') : chip('In', 'grey');
         var s = i.session ? sess(m, i.session) : null;
         return '<div class="row"><span class="id">' + esc(i.id) + '</span><div class="grow"><p' + (i.cond === 'Out of service' ? ' style="color:#8A8D99"' : '') + '>' + esc(i.name) + '</p>' +
           (s && i.status !== 'In' ? '<p class="sub">' + esc(s.name) + '</p>' : '') + '</div>' + st + '</div>';
@@ -673,7 +708,7 @@
     var f = S.form;
     var people = S.model.people;
     var kits = S.model.sessions.filter(function (s) { return Object.keys(s.packed || {}).length; }).slice(0, 6);
-    var h = '<div class="view glow"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Cancel">' + ic('x', 20) + '</button><span class="ttl">New session</span><span style="width:44px"></span></div>' +
+    var h = '<div class="view glow"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Cancel">' + ic('x', 20) + '</button><span class="ttl">New shoot</span><span style="width:44px"></span></div>' +
       '<div class="group" style="margin-top:14px"><label class="form-row" for="nm"><span class="muted" style="width:90px">Shoot</span><input id="nm" value="' + esc(f.name) + '" placeholder="e.g. Hutong reel" autocomplete="off" enterkeyhint="done"></label>' +
       '<label class="form-row" for="dt"><span class="muted" style="flex:1">Shoot date</span><input id="dt" type="date" value="' + esc(f.shootDate) + '" style="flex:none;width:auto"></label></div>' +
       '<p class="muted small" style="margin:8px 4px 0">No return date needed. It is recorded when the gear is checked back.</p>' +
@@ -712,7 +747,7 @@
   /* ---------- session detail */
   function renderSession() {
     var s = currentSession();
-    if (!s) return '<div class="view"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Back">' + ic('back', 20) + '</button></div><div class="empty"><b>Session not found</b>It may have been deleted.</div></div>';
+    if (!s) return '<div class="view"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Back">' + ic('back', 20) + '</button></div><div class="empty"><b>Shoot not found</b>It may have been deleted.</div></div>';
     var c = counts(s), out = Object.keys(s.packed).filter(function (k) { return !s.back[k]; });
     var chipx = s.overdue ? chip('Overdue · ' + plural(daysSince(s.packedAt || s.created), 'day'), 'red') : s.phase === 'Closed' ? chip('Closed', 'grey') : s.phase === 'Checking' ? chip('Checking back', 'v') : s.phase === 'Packing' ? chip('Packing', 'y') : chip('Out · ' + plural(c.packed, 'item'), 'y');
     var h = '<div class="view"><div class="topbar"><button class="circ glass press" data-act="back" aria-label="Back">' + ic('back', 20) + '</button><span data-sync>' + syncChip() + '</span>' +
@@ -725,7 +760,7 @@
     groupByCat(Object.keys(s.packed)).forEach(function (g) {
       h += '<p class="sec">' + esc(CAT_PLURAL[g.cat] || g.cat) + ' · ' + g.codes.length + '</p><div class="group">' + g.codes.map(function (k) {
         var it = item(S.model, k) || {};
-        return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + (s.back[k] ? chip('Back', 'grey') : '') + '</div>';
+        return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + (s.typed && s.typed[k] ? chip('Typed', 'y') : '') + (s.back[k] ? chip('Back', 'grey') : '') + '</div>';
       }).join('') + '</div>';
     });
     if (!c.packed) h += '<div class="empty"><b>No items yet</b>Scan gear to add it to this shoot.</div>';
@@ -744,7 +779,7 @@
     var c = counts(s);
     return '<div class="view glow" style="display:flex;flex-direction:column;align-items:center;text-align:center">' +
       '<div style="margin-top:18vh"><span style="width:96px;height:96px;border-radius:48px;background:var(--green);color:var(--bg);display:flex;align-items:center;justify-content:center;margin:0 auto">' + ic('check', 52, 3) + '</span>' +
-      '<h1 class="title" style="margin-top:26px">All ' + c.packed + ' back</h1><p class="muted" style="font-size:15px;margin-top:8px">Nothing missing.' + (c.damaged ? ' ' + plural(c.damaged, 'item') + ' marked damaged.' : ' Nothing damaged.') + '<br>Good shoot, go rest.</p></div></div>' +
+      '<h1 class="title" style="margin-top:26px">All ' + c.packed + ' back</h1><p class="muted" style="font-size:15px;margin-top:8px">Nothing missing.' + (c.damaged ? ' ' + plural(c.damaged, 'item') + ' marked damaged.' : ' Nothing damaged.') + '<br>Good shoot, go rest.</p>' + (Object.keys(s.typed || {}).length ? '<p class="small" style="margin-top:14px;color:var(--pack)">' + plural(Object.keys(s.typed).length, 'item') + ' typed in by hand. The report lists them.</p>' : '') + '</div></div>' +
       '<div class="bottom-action" style="flex-direction:column"><p class="muted small" style="text-align:center;margin:0">Report goes to Chamath' + (S.model.testMode ? '' : ', with the team on CC') + '</p>' +
       '<button class="cta press" data-act="close-session">Close and send report</button></div>';
   }
@@ -769,7 +804,7 @@
         '<div class="cam-overlay" style="top:calc(50% + var(--sat) / 2 - ' + (pack ? 2 : 0) + 'px)"><button class="zoom-btn glass press" data-act="zoom" aria-label="Zoom in for small stickers">2x</button>' +
         '</div></div>' +
         '<div class="panel"><div class="grab"></div><div class="scroll" data-panel></div></div>' +
-        '<div class="scan-foot"><span class="muted small" data-foot-count></span><button class="foot-btn press" data-act="' + (pack ? 'done-packing' : 'finish') + '">' + (pack ? 'Done packing' : 'Finish') + ic('chev', 16, 2.4) + '</button></div>' +
+        '<div class="scan-foot"><button class="type-link press" data-act="type-open">Can\u2019t scan? Type it</button><button class="foot-btn press" data-act="' + (pack ? 'done-packing' : 'finish') + '">' + (pack ? 'Done packing' : 'Finish') + ic('chev', 16, 2.4) + '</button></div>' +
         '<div class="cam-flash" data-camflash></div></div>';
       mountedScanner = key;
       startCamera();
@@ -795,7 +830,7 @@
         h += recent.length ? '<div style="margin:4px -16px 0">' + recent.map(function (k) {
           var it = item(S.model, k) || {};
           return '<div class="swipe" data-swipe="' + esc(k) + '"><button class="under" data-act="remove" data-code="' + esc(k) + '">' + ic('trash', 20) + 'Remove</button>' +
-            '<div class="over"><div class="row" style="padding:0 20px;min-height:60px"><span class="id">' + esc(k) + '</span><div class="grow"><p>' + esc(it.name) + '</p><p class="sub">by ' + esc(whoShort(s.packed[k].by)) + ' · ' + ago(s.packed[k].at) + '</p></div></div></div></div>';
+            '<div class="over"><div class="row" style="padding:0 20px;min-height:60px"><span class="id">' + esc(k) + '</span><div class="grow"><p>' + esc(it.name) + '</p><p class="sub">' + (s.typed && s.typed[k] ? '<span style="color:var(--pack)">Typed</span> by ' : 'by ') + esc(whoShort(s.packed[k].by)) + ' · ' + ago(s.packed[k].at) + '</p></div></div></div></div>';
         }).join('') + '</div><p class="muted small" style="text-align:center;margin:12px 0 0">Swipe left or hold an item to remove it</p>'
           : '<div class="empty" style="padding:28px 12px"><b>Point the camera at a sticker</b>Check the name that pops up, then tap Add. The camera stays on.</div>';
       }
@@ -817,7 +852,7 @@
     }
     el.innerHTML = h;
     var fc = $('[data-foot-count]');
-    if (fc) { var cc = counts(s); fc.textContent = S.view === 'pack' ? plural(cc.packed, 'item') + ' packed' : cc.back + ' of ' + cc.packed + ' back'; }
+    if (fc && false) { var cc = counts(s); fc.textContent = S.view === 'pack' ? plural(cc.packed, 'item') + ' packed' : cc.back + ' of ' + cc.packed + ' back'; }
     bindSwipes();
   }
 
@@ -1062,6 +1097,28 @@
         '</div></div>';
       return;
     }
+    if (sh.type === 'typein') {
+      var pk2 = S.view === 'pack';
+      var tit = sh.code ? item(S.model, sh.code) : null;
+      h = sheetHead('Type the item ID') +
+        '<p class="muted small" style="margin:8px 4px 0">Only when the sticker is lost or won\u2019t scan. It shows as typed in the report' + (pk2 ? '' : ', so the team can see it was not scanned') + '.</p>' +
+        '<label class="sr" for="tid">Item ID</label><div class="field" style="margin-top:14px;background:rgba(255,255,255,.08)"><input id="tid" placeholder="e.g. 8-L" autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false" maxlength="8" value="' + esc(sh.code || '') + '" style="text-transform:uppercase;font-weight:700;letter-spacing:.04em"></div>' +
+        '<p class="small" data-tmatch style="margin:8px 4px 0;min-height:18px;' + (sh.err ? 'color:var(--red)' : 'color:var(--muted)') + '">' + esc(sh.err || (tit ? tit.name + ' \u00b7 ' + tit.cat : '')) + '</p>' +
+        '<p class="sec" style="margin-top:14px">Why are you typing it?</p><div style="display:flex;flex-wrap:wrap;gap:8px">' +
+        ['Sticker missing', 'Sticker damaged', 'Sticker won\u2019t scan'].map(function (r) { return '<button class="pill press' + (sh.reason === r ? ' on' : '') + '" data-act="type-reason" data-r="' + esc(r) + '">' + (sh.reason === r ? ic('check', 16, 2.4) : '') + esc(r) + '</button>'; }).join('') + '</div>' +
+        '<p class="muted small" style="margin:10px 4px 0">It goes on the sticker reprint list.</p>' +
+        '<button class="cta press" style="margin-top:16px" data-act="type-save">' + (pk2 ? 'Add to this shoot' : 'Mark as back') + '</button>';
+      root.innerHTML = '<div class="scrim" data-act="close-sheet"></div><div class="sheet glass" role="dialog" aria-modal="true">' + h + '</div>';
+      var tin = $('#tid');
+      tin.oninput = function () {
+        tin.value = tin.value.toUpperCase().replace(/[^0-9A-Z-]/g, '');
+        S.sheet.code = tin.value; S.sheet.err = '';
+        var x = item(S.model, norm(tin.value)); var mt = $('[data-tmatch]');
+        mt.style.color = 'var(--muted)'; mt.textContent = x ? x.name + ' \u00b7 ' + x.cat : (tin.value.length > 2 ? 'No item with this ID yet' : '');
+      };
+      if (!sh.code) setTimeout(function () { try { tin.focus(); } catch (e) { } }, 250);
+      return;
+    }
     if (sh.type === 'elsewhere') {
       var o = sh.other || {};
       h = '<div style="text-align:center;padding-top:10px"><span class="badge" style="background:rgba(var(--pack-rgb),.16);color:var(--pack)">' + ic('warn', 28) + '</span>' +
@@ -1089,6 +1146,7 @@
         '<h2 class="h2" style="margin-top:14px">' + plural(c.missing, 'item') + ' still missing</h2><p class="muted" style="margin:6px 0 0">Have one last look around before you leave.</p></div>' +
         '<div class="group" style="margin-top:16px">' + missing.slice(0, 6).map(function (k) { var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + chip('Missing', 'red') + '</div>'; }).join('') +
         dmg.slice(0, 3).map(function (k) { var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><span style="flex:1;min-width:0">' + esc(it.name) + '</span>' + chip('Damaged', 'red') + '</div>'; }).join('') + '</div>' +
+        (Object.keys(s.typed || {}).length ? '<p class="small" style="margin:12px 4px 0;color:var(--pack)">' + plural(Object.keys(s.typed).length, 'item') + ' typed in by hand. The report lists them.</p>' : '') +
         '<button class="cta press" style="margin-top:18px" data-act="save-later">Save for now, finish at the office</button>' +
         '<button class="btn2 press" style="margin-top:10px" data-act="close-session">Close and send report</button>' +
         '<p class="muted small" style="text-align:center;margin:12px 0 0">Saving keeps this shoot open. Anyone can carry on checking later, on any phone. Close only when everything is done.</p>';
@@ -1105,17 +1163,17 @@
         '<button class="cta red press" style="margin-top:18px" data-act="remove" data-code="' + esc(sh.code) + '">Remove</button><button class="link press" data-act="close-sheet">Keep it</button>';
     } else if (sh.type === 'list') {
       h = sheetHead(sh.title) + '<div class="group" style="margin-top:12px">' + (sh.codes.length ? sh.codes.map(function (k) {
-        var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><div class="grow"><p>' + esc(it.name) + '</p>' + (sh.subs && sh.subs[k] ? '<p class="sub">' + esc(sh.subs[k]) + '</p>' : '') + '</div>' + (s && s.damaged[k] ? chip('Damaged', 'red') : '') + '</div>';
+        var it = item(S.model, k) || {}; return '<div class="row"><span class="id">' + esc(k) + '</span><div class="grow"><p>' + esc(it.name) + '</p>' + (sh.subs && sh.subs[k] ? '<p class="sub">' + esc(sh.subs[k]) + '</p>' : '') + '</div>' + (s && s.typed && s.typed[k] ? chip('Typed', 'y') : '') + (s && s.damaged[k] ? chip('Damaged', 'red') : '') + '</div>';
       }).join('') : '<div class="empty">Nothing yet</div>') + '</div>';
     } else if (sh.type === 'menu') {
       var ss = s;
       h = sheetHead(ss.name) + '<div class="group" style="margin-top:12px">' +
         (ss.phase !== 'Closed' && ss.phase !== 'Checking' ? '<button class="row press" data-act="edit-items"><span style="flex:1">Add or remove items</span>' + ic('chev', 16) + '</button>' : '') +
         (ss.phase !== 'Closed' ? '<button class="row press" data-act="snooze"><span style="flex:1">Still shooting, remind me tomorrow</span></button>' : '') +
-        (S.me.isAdmin ? '<button class="row press" data-act="ask-delete" style="color:var(--red)"><span style="flex:1">Delete this session</span>' + ic('trash', 18) + '</button>' : '') + '</div>';
+        (S.me.isAdmin ? '<button class="row press" data-act="ask-delete" style="color:var(--red)"><span style="flex:1">Delete this shoot</span>' + ic('trash', 18) + '</button>' : '') + '</div>';
     } else if (sh.type === 'delete') {
-      h = sheetHead('Delete session') + '<p style="margin:16px 4px 0;font-size:15px">Delete <b>' + esc(s.name) + '</b>? All its scans are removed and every item goes back to In. This cannot be undone.</p>' +
-        '<button class="cta red press" style="margin-top:18px" data-act="delete-session">Delete session</button><button class="link press" data-act="close-sheet">Keep it</button>';
+      h = sheetHead('Delete shoot') + '<p style="margin:16px 4px 0;font-size:15px">Delete <b>' + esc(s.name) + '</b>? All its scans are removed and every item goes back to In. This cannot be undone.</p>' +
+        '<button class="cta red press" style="margin-top:18px" data-act="delete-session">Delete shoot</button><button class="link press" data-act="close-sheet">Keep it</button>';
     } else if (sh.type === 'account') {
       h = sheetHead('Account') + '<div class="group" style="margin-top:12px"><div class="row"><span class="muted" style="flex:1">Name</span><span>' + esc(S.me.name) + '</span></div>' +
         '<div class="row"><span class="muted" style="flex:1">Email</span><span>' + esc(S.me.email) + '</span></div>' +
@@ -1155,6 +1213,14 @@
       case 'refresh': S.sheet = null; renderSheet(); refresh().then(function () { toast({ title: 'Up to date', kind: 'grey', ms: 1500 }); }); break;
       case 'close-sheet': S.sheet = null; renderSheet(); break;
       case 'confirm-add': confirmScan('add'); break;
+      case 'type-open': S.sheet = { type: 'typein', code: '', reason: '', err: '' }; renderSheet(); break;
+      case 'type-reason': S.sheet.code = ($('#tid') || {}).value || S.sheet.code; S.sheet.reason = el.dataset.r; S.sheet.err = ''; renderSheet(); break;
+      case 'type-save': saveTyped(); break;
+      case 'clear-reprint': {
+        var ids = S.model.items.filter(function (x) { return x.reprint; }).map(function (x) { return x.id; });
+        enqueue({ type: 'clearReprint', body: { ids: ids } }); render();
+        toast({ title: 'Reprint list cleared', kind: 'grey' }); break;
+      }
       case 'confirm-damaged': confirmScan('damaged'); break;
       case 'confirm-skip':
         if (S.sheet && S.sheet.code) Cam.seen[S.sheet.code] = Date.now();
@@ -1166,6 +1232,7 @@
         var t = sess(S.model, el.dataset.sid); S.sid = t.id;
         if (t.phase === 'Packing') go('pack', { sid: t.id });
         else if (t.phase === 'Checking') go('check', { sid: t.id });
+        else if (t.phase === 'Out') { enqueue({ type: 'startCheck', body: { sessionId: t.id } }); go('check', { sid: t.id }); }
         else go('session', { sid: t.id });
         break;
       }
@@ -1225,12 +1292,12 @@
       }
       case 'save-later':
         S.sheet = null; S.stack = []; S.view = 'home'; S.tab = 'home'; render();
-        toast({ title: 'Saved', sub: 'Carry on checking from Sessions any time, on any phone', kind: 'grey' });
+        toast({ title: 'Saved', sub: 'Carry on checking from Shoots any time, on any phone', kind: 'grey' });
         break;
       case 'close-session':
         enqueue({ type: 'close', body: { sessionId: s.id } });
         S.sheet = null; S.stack = []; S.view = 'home'; S.tab = 'home'; render();
-        if (!S.online) toast({ title: 'Session closed', sub: 'The report sends when you have signal', kind: 'sync' });
+        if (!S.online) toast({ title: 'Shoot closed', sub: 'The report sends when you have signal', kind: 'sync' });
         break;
       case 'save-damaged': {
         var sh2 = S.sheet, note = ($('#dn').value || '').trim();
@@ -1250,7 +1317,7 @@
       case 'delete-session':
         enqueue({ type: 'deleteSession', body: { sessionId: s.id } });
         S.sheet = null; S.stack = []; S.view = 'home'; S.tab = 'home'; render();
-        toast({ title: 'Session deleted', kind: 'grey' });
+        toast({ title: 'Shoot deleted', kind: 'grey' });
         break;
     }
   });

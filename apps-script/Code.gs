@@ -13,11 +13,11 @@ var TOKEN_DAYS = 365;
 var REMIND_AFTER_HOURS = 24;
 
 var COLS = {
-  Items: ['ItemID', 'Name', 'Category', 'Brand', 'Condition', 'Notes', 'Status', 'Session', 'LastSeen'],
+  Items: ['ItemID', 'Name', 'Category', 'Brand', 'Condition', 'Notes', 'Status', 'Session', 'LastSeen', 'Reprint'],
   People: ['Email', 'Name', 'IsAdmin'],
   Sessions: ['SessionID', 'ShootName', 'ShootDate', 'ReturnDate', 'BasedOn', 'PackedBy', 'Team', 'Phase', 'Created',
     'PackedAt', 'ClosedAt', 'ClosedBy', 'SendReport', 'ReportSent', 'ReminderSent', 'CheckStartedAt', 'SnoozeUntil', 'ReportUrl'],
-  Scans: ['ScanID', 'Timestamp', 'Item', 'Session', 'Direction', 'ScannedBy', 'Damaged', 'Note', 'ClientID']
+  Scans: ['ScanID', 'Timestamp', 'Item', 'Session', 'Direction', 'ScannedBy', 'Damaged', 'Note', 'ClientID', 'Method']
 };
 
 function P() { return PropertiesService.getScriptProperties(); }
@@ -235,6 +235,7 @@ var ACTIONS = {
   damaged: markDamaged,
   close: closeSession,
   resend: resendReport,
+  clearReprint: clearReprint,
   deleteSession: deleteSession,
   snooze: function (me, b) { var t = table('Sessions'); var s = findSession(t, b.sessionId); setCell(t, s, 'SnoozeUntil', new Date(Date.now() + 864e5)); return {}; }
 };
@@ -266,13 +267,13 @@ function addToTeam(st, s, email) {
 function scanRow(scans, o) {
   return append(scans, {
     ScanID: Utilities.getUuid().slice(0, 8), Timestamp: new Date(), Item: o.item, Session: o.session,
-    Direction: o.dir, ScannedBy: o.by, Damaged: false, Note: o.note || '', ClientID: o.clientId || ''
+    Direction: o.dir, ScannedBy: o.by, Damaged: false, Note: o.note || '', ClientID: o.clientId || '', Method: o.method || ''
   });
 }
 
 function sessionSummary(s, scans) {
   var id = String(s.SessionID);
-  var packed = {}, back = {}, extra = {}, damaged = {}, log = [];
+  var packed = {}, back = {}, extra = {}, damaged = {}, damagedBy = {}, typed = {}, log = [];
   scans.rows.forEach(function (r) {
     if (String(r.Session) !== id) return;
     var it = norm(r.Item);
@@ -282,9 +283,15 @@ function sessionSummary(s, scans) {
     if (d === 'IN') back[it] = { by: r.ScannedBy, at: iso(r.Timestamp), note: r.Note };
     if (d === 'EXTRA') extra[it] = { by: r.ScannedBy, at: iso(r.Timestamp), note: r.Note };
     if (truthy(r.Damaged)) damaged[it] = r.Note || 'Damaged';
+    var how = String(r.Method || '').indexOf('Typed') === 0 ? String(r.Method).replace(/^Typed:\s*/, '') : '';
+    if (how && d === 'OUT') packed[it].typed = how;
+    if (how && d === 'IN') back[it].typed = how;
+    if (how && d === 'EXTRA') extra[it].typed = how;
+    if (truthy(r.Damaged)) damagedBy[it] = r.ScannedBy;
+    if (how && (d === 'OUT' || d === 'IN' || d === 'EXTRA')) typed[it] = { by: r.ScannedBy, at: iso(r.Timestamp), reason: String(r.Method).replace(/^Typed:\s*/, ''), step: d === 'OUT' ? 'packing' : 'checking back' };
     log.push({ item: it, dir: d, by: r.ScannedBy, at: iso(r.Timestamp) });
   });
-  return { packed: packed, back: back, extra: extra, damaged: damaged, log: log };
+  return { packed: packed, back: back, extra: extra, damaged: damaged, damagedBy: damagedBy, typed: typed, log: log };
 }
 
 function dueTime(s) {
@@ -313,14 +320,14 @@ function buildState(me) {
       packedBy: s.PackedBy, team: String(s.Team || '').split(',').map(function (x) { return x.trim(); }).filter(String),
       phase: s.Phase, created: iso(s.Created), packedAt: iso(s.PackedAt), closedAt: iso(s.ClosedAt), closedBy: s.ClosedBy || '',
       reportUrl: s.ReportUrl || '', due: new Date(due).toISOString(), overdue: s.Phase !== 'Closed' && s.Phase !== 'Packing' && Date.now() > due,
-      packed: sum.packed, back: sum.back, extra: sum.extra, damaged: sum.damaged
+      packed: sum.packed, back: sum.back, extra: sum.extra, damaged: sum.damaged, typed: sum.typed
     };
   }).sort(function (a, b) { return (b.created || '').localeCompare(a.created || ''); });
   return {
     me: me, now: new Date().toISOString(), testMode: testMode(),
     people: people(),
     items: items.rows.filter(function (r) { return r.ItemID; }).map(function (r) {
-      return { id: norm(r.ItemID), name: r.Name, cat: r.Category, cond: r.Condition || 'OK', status: r.Status || 'In', session: String(r.Session || ''), lastSeen: iso(r.LastSeen) };
+      return { id: norm(r.ItemID), name: r.Name, cat: r.Category, cond: r.Condition || 'OK', status: r.Status || 'In', session: String(r.Session || ''), reprint: truthy(r.Reprint), lastSeen: iso(r.LastSeen) };
     }),
     sessions: sessions
   };
@@ -355,6 +362,7 @@ function scanItem(me, b) {
   var sid = String(s.SessionID);
   var label = code + ' ' + it.Name;
   if (s.Phase === 'Closed') return { result: 'closed' };
+  var method = b.typed ? 'Typed: ' + String(b.reason || 'No reason given').slice(0, 60) : 'Scanned';
 
   if (b.mode === 'pack') {
     if (String(it.Condition) === 'Out of service') return { result: 'oos', item: code, label: label };
@@ -366,7 +374,8 @@ function scanItem(me, b) {
     }
     var found = it.Status === 'Missing';
     if (found) scanRow(scans, { item: code, session: it.Session, dir: 'IN', by: me.email, note: 'Found while packing ' + s.ShootName });
-    scanRow(scans, { item: code, session: sid, dir: 'OUT', by: me.email, clientId: b.clientId });
+    scanRow(scans, { item: code, session: sid, dir: 'OUT', by: me.email, clientId: b.clientId, method: method });
+    markSticker(items, it, b);
     setCell(items, it, 'Status', 'Out'); setCell(items, it, 'Session', sid); setCell(items, it, 'LastSeen', new Date());
     addToTeam(st, s, me.email);
     if (found) notifyFound(it, me);
@@ -379,7 +388,8 @@ function scanItem(me, b) {
   if (sum.back[code] || sum.extra[code]) return { result: 'already', item: code, label: label };
   addToTeam(st, s, me.email);
   if (it.Status === 'Out' && String(it.Session) === sid) {
-    scanRow(scans, { item: code, session: sid, dir: 'IN', by: me.email, clientId: b.clientId });
+    scanRow(scans, { item: code, session: sid, dir: 'IN', by: me.email, clientId: b.clientId, method: method });
+    markSticker(items, it, b);
     setCell(items, it, 'Status', 'In'); setCell(items, it, 'Session', ''); setCell(items, it, 'LastSeen', new Date());
     return { result: 'back', item: code, label: label };
   }
@@ -390,7 +400,8 @@ function scanItem(me, b) {
     scanRow(scans, { item: code, session: it.Session, dir: 'IN', by: me.email, note: 'Came back with ' + s.ShootName });
     if (it.Status === 'Missing') notifyFound(it, me);
   }
-  scanRow(scans, { item: code, session: sid, dir: 'EXTRA', by: me.email, clientId: b.clientId, note: otherName ? 'From ' + otherName : '' });
+  scanRow(scans, { item: code, session: sid, dir: 'EXTRA', by: me.email, clientId: b.clientId, note: otherName ? 'From ' + otherName : '', method: method });
+  markSticker(items, it, b);
   setCell(items, it, 'Status', 'In'); setCell(items, it, 'Session', ''); setCell(items, it, 'LastSeen', new Date());
   return { result: otherName ? 'extra_other' : 'extra', item: code, label: label, otherName: otherName };
 }
@@ -410,8 +421,10 @@ function confirmPacking(me, b) {
   var s = findSession(st, b.sessionId);
   var sum = sessionSummary(s, scans);
   if (!Object.keys(sum.packed).length) return { ok: false, error: 'Scan at least one item first.' };
+  var firstConfirm = s.Phase === 'Packing';
   if (s.Phase === 'Packing') setCell(st, s, 'Phase', 'Out');
   if (!s.PackedAt) setCell(st, s, 'PackedAt', new Date());
+  if (firstConfirm) { try { sendPackedEmail(s, table('Items'), scans, me); } catch (e) { console.error(e); } }
   return {};
 }
 
@@ -478,28 +491,10 @@ function sendReport(s, items, scans) {
   var m = itemMap(items);
   var sum = sessionSummary(s, scans);
   var packed = Object.keys(sum.packed);
-  var back = packed.filter(function (k) { return sum.back[k]; });
   var missing = packed.filter(function (k) { return !sum.back[k]; });
-  var extra = Object.keys(sum.extra);
-  var dmg = Object.keys(sum.damaged);
-  function rows(list, extraFn) {
-    if (!list.length) return '<p style="color:#777;margin:4px 0 14px">None</p>';
-    return '<table style="width:100%;border-collapse:collapse;margin-bottom:16px">' + list.map(function (k) {
-      var it = m[k] || {};
-      return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;width:70px;font-weight:bold">' + esc(k) + '</td><td style="padding:6px 8px;border-bottom:1px solid #eee">' + esc(it.Name) + '</td><td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666">' + esc(extraFn ? extraFn(k) : (it.Category || '')) + '</td></tr>';
-    }).join('') + '</table>';
-  }
-  var team = String(s.Team || '').split(',').map(function (e) { return nameOf(e.trim()); }).filter(String).join(', ');
-  var html = '<div style="font-family:Arial,sans-serif;color:#111;font-size:13px">' +
-    '<h1 style="font-size:22px;margin:0">' + esc(s.ShootName) + '</h1>' +
-    '<p style="color:#555;margin:4px 0 16px">Shoot ' + dateOnly(s.ShootDate) + ' · Packed by ' + esc(nameOf(s.PackedBy)) + ' · Closed by ' + esc(nameOf(s.ClosedBy)) + ' on ' + (s.ClosedAt ? Utilities.formatDate(new Date(s.ClosedAt), 'Asia/Dubai', 'd MMM yyyy, h:mm a') : '') + '<br>Team: ' + esc(team) + '</p>' +
-    '<p style="font-size:15px"><b>' + packed.length + '</b> packed · <b>' + back.length + '</b> back · <b style="color:#c0264a">' + missing.length + ' missing</b> · <b>' + dmg.length + '</b> damaged · <b>' + extra.length + '</b> extra</p>' +
-    '<h2 style="font-size:15px;color:#c0264a;margin:18px 0 4px">Missing</h2>' + rows(missing, function (k) { return 'Packed by ' + nameOf(sum.packed[k].by); }) +
-    '<h2 style="font-size:15px;margin:18px 0 4px">Damaged</h2>' + rows(dmg, function (k) { return sum.damaged[k]; }) +
-    '<h2 style="font-size:15px;margin:18px 0 4px">Extra (not packed for this shoot)</h2>' + rows(extra, function (k) { return sum.extra[k].note || ''; }) +
-    '<h2 style="font-size:15px;margin:18px 0 4px">Back</h2>' + rows(back) +
-    '<p style="color:#888;font-size:11px;margin-top:24px">EyeStudio Equipment Tracker · Session ' + esc(s.SessionID) + '</p></div>';
-  var pdf = Utilities.newBlob(html, 'text/html', 'report.html').getAs('application/pdf')
+  var html = reportHtml(s, m, sum, MAIL_DARK);
+  var printHtml = reportHtml(s, m, sum, MAIL_LIGHT, true);
+  var pdf = Utilities.newBlob(printHtml, 'text/html', 'report.html').getAs('application/pdf')
     .setName(dateOnly(s.ShootDate) + ' ' + s.ShootName + ' report.pdf');
   var file = DriveApp.getFolderById(prop('REPORTS_FOLDER')).createFile(pdf);
   var subject = (missing.length ? missing.length + ' missing · ' : 'All back · ') + s.ShootName;
@@ -588,4 +583,125 @@ function archiveOldScans() {
   arch.getRange(arch.getLastRow() + 1, 1, values.length, scans.head.length).setValues(values);
   move.map(function (r) { return r._r; }).sort(function (a, c) { return c - a; }).forEach(function (n) { scans.sh.deleteRow(n); });
   return 'Archived ' + move.length + ' scans';
+}
+
+/** Typed in because the sticker is gone or broken: put it on the reprint list. A real scan later clears it. */
+function markSticker(items, it, b) {
+  if (items.idx.Reprint === undefined) return;
+  if (b.typed) { if (/sticker/i.test(String(b.reason || ''))) setCell(items, it, 'Reprint', true); }
+  else if (truthy(it.Reprint)) setCell(items, it, 'Reprint', false);
+}
+
+function clearReprint(me, b) {
+  if (!me.isAdmin) return { ok: false, error: 'Only Chamath can clear the reprint list.' };
+  var items = table('Items');
+  var ids = (b.ids || []).map(norm);
+  items.rows.forEach(function (it) { if (truthy(it.Reprint) && (!ids.length || ids.indexOf(norm(it.ItemID)) > -1)) setCell(items, it, 'Reprint', false); });
+  return {};
+}
+
+var CAT_ORDER = ['Camera', 'Lens', 'Light', 'Stand / Tripod', 'Bag', 'Gimbal', 'Drone', 'Mic', 'Battery', 'Charger', 'Memory Card', 'Lens Filter', 'Cable', 'Miscellaneous', 'New Equipment (2026)'];
+var CAT_NAMES = { 'Camera': 'Cameras', 'Lens': 'Lenses', 'Light': 'Lights', 'Stand / Tripod': 'Stands and tripods', 'Bag': 'Bags', 'Gimbal': 'Gimbals', 'Drone': 'Drones', 'Mic': 'Mics', 'Battery': 'Batteries', 'Charger': 'Chargers', 'Memory Card': 'Memory cards', 'Lens Filter': 'Lens filters', 'Cable': 'Cables', 'Miscellaneous': 'Other', 'New Equipment (2026)': 'New equipment' };
+
+/* ------------------------------------------------ email look (dark like the app, light for the printable PDF) */
+var MAIL_DARK = { bg: '#0B0C11', card: '#181A23', line: '#262935', text: '#F5F6FA', muted: '#9A9DA8', yellow: '#FFD43B', violet: '#9D8CFF', red: '#FF5C7A', green: '#3DDC84', warn: '#2A2512' };
+var MAIL_LIGHT = { bg: '#FFFFFF', card: '#F5F6FA', line: '#E3E4EA', text: '#111111', muted: '#666A75', yellow: '#8A6D00', violet: '#5B4BD6', red: '#C0264A', green: '#1E8C4E', warn: '#FFF6DD' };
+
+function mailShell(T, inner, pre) {
+  return (pre ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' + esc(pre) + '</div>' : '') + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + T.bg + '" style="background:' + T.bg + '"><tr><td align="center" style="padding:32px 20px 40px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;font-family:-apple-system,Helvetica,Arial,sans-serif;color:' + T.text + ';font-size:15px;line-height:1.5"><tr><td>' + inner + '</td></tr></table></td></tr></table>';
+}
+function mailHead(T, eyebrow, color, title, meta) {
+  return '<div style="font-size:11px;font-weight:bold;letter-spacing:.12em;color:' + color + '">' + eyebrow + '</div>' +
+    '<div style="font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:bold;margin:8px 0 10px;color:' + T.text + '">' + esc(title) + '</div>' +
+    '<div style="color:' + T.muted + ';font-size:14px;line-height:1.7;margin:0 0 28px">' + meta + '</div>';
+}
+function mailSection(T, label, color, n) {
+  return '<div style="margin:26px 0 8px 4px;font-size:11px;font-weight:bold;letter-spacing:.1em;color:' + (color || T.muted) + '">' + label.toUpperCase() + (n !== undefined ? ' · ' + n : '') + '</div>';
+}
+/** One card of items, one line each. by(k) returns { who, note, typed }: who sits on the right, note (if any) under the name. */
+function mailItems(T, m, list, accent, by, head) {
+  if (!list.length) return '<div style="color:' + T.muted + ';font-size:13px;margin-left:4px">None</div>';
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + T.card + '" style="background:' + T.card + ';border-radius:16px;border-collapse:separate">' +
+    list.map(function (k, i) {
+      var l = (by && by(k)) || {};
+      var h = head ? head(k, i) : '';
+      var top = i && !h ? 'border-top:1px solid ' + T.line + ';' : '';
+      return (h ? '<tr><td colspan="3" style="' + (i ? 'border-top:1px solid ' + T.line + ';' : '') + 'padding:' + (i ? 16 : 14) + 'px 16px 2px;font-size:11px;font-weight:bold;letter-spacing:.1em;color:' + T.muted + '">' + h + '</td></tr>' : '') +
+        '<tr><td valign="top" style="' + top + 'padding:12px 0 12px 16px;width:56px;white-space:nowrap;font-weight:bold;font-size:13px;line-height:1.45;color:' + accent + '">' + esc(k) + '</td>' +
+        '<td valign="top" style="' + top + 'padding:12px 8px;font-size:14px;line-height:1.45;color:' + T.text + '">' + esc((m[k] || {}).Name || 'Unknown item') +
+        (l.note ? '<div style="font-size:12px;margin-top:2px;color:' + (l.typed ? T.yellow : T.muted) + '">' + esc(l.note) + '</div>' : '') + '</td>' +
+        '<td valign="top" align="right" style="' + top + 'padding:12px 16px 12px 0;white-space:nowrap;font-size:12px;line-height:1.7;color:' + (l.typed ? T.yellow : T.muted) + '">' + esc(l.who || '') + '</td></tr>';
+    }).join('') + '</table>';
+}
+function mailTypedNote(T, list, sum) {
+  if (!list.length) return '';
+  return '<div style="background:' + T.warn + ';border-radius:16px;padding:14px 16px;margin:12px 0 0;color:' + T.yellow + ';font-size:14px;line-height:1.5"><b>' + list.length + ' typed in by hand, not scanned:</b> ' +
+    list.map(function (k) { return '<span style="white-space:nowrap">' + esc(k) + '</span>'; }).join(', ') + '</div>';
+}
+function whoLine(verb, rec) {
+  if (!rec) return null;
+  var who = (verb ? verb + ' ' : '') + nameOf(rec.by);
+  return rec.typed ? { who: who, note: 'Typed in · ' + rec.typed, typed: true } : { who: who };
+}
+function teamNames(s) { return String(s.Team || '').split(',').map(function (e) { return nameOf(e.trim()); }).filter(String).join(', '); }
+
+/** Email when packing is confirmed: what went out, grouped by type, with who packed each item. */
+function packedEmailHtml(s, m, sum, me, T) {
+  T = T || MAIL_DARK;
+  var codes = Object.keys(sum.packed);
+  var groups = {};
+  codes.forEach(function (k) { var c = (m[k] && m[k].Category) || 'Miscellaneous'; if (CAT_ORDER.indexOf(c) === -1) c = 'Miscellaneous'; (groups[c] = groups[c] || []).push(k); });
+  var when = Utilities.formatDate(s.PackedAt instanceof Date ? s.PackedAt : new Date(), 'Asia/Dubai', 'EEE d MMM, HH:mm');
+  var typed = codes.filter(function (k) { return sum.packed[k].typed; });
+  var packers = codes.map(function (k) { return nameOf(sum.packed[k].by); }).filter(function (n, i, a) { return n && a.indexOf(n) === i; }).join(', ') || nameOf(me.email);
+  var inner = mailHead(T, 'GEAR IS OUT', T.yellow, s.ShootName,
+    codes.length + ' items · packed by ' + esc(packers) + ' · ' + when + '<br>Shoot ' + dateOnly(s.ShootDate) + ' · Team: ' + esc(teamNames(s))) +
+    mailTypedNote(T, typed, sum);
+  var ordered = [], headAt = {};
+  CAT_ORDER.forEach(function (c) {
+    if (!groups[c]) return;
+    var list = groups[c].sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
+    headAt[ordered.length] = esc((CAT_NAMES[c] || c).toUpperCase()) + ' · ' + list.length;
+    ordered = ordered.concat(list);
+  });
+  inner += '<div style="height:20px"></div>' + mailItems(T, m, ordered, T.yellow, function (k) { return whoLine('', sum.packed[k]); }, function (k, i) { return headAt[i] || ''; });
+  inner += '<div style="color:' + T.muted + ';font-size:14px;line-height:1.6;margin:36px 4px 0">After the shoot, open the Equipment Tracker and tap Check gear back. A reminder goes out if it is not checked back within 24 hours.</div>' +
+    '<div style="color:' + T.muted + ';opacity:.6;font-size:11px;margin:28px 4px 0">EyeStudio Equipment Tracker · Shoot ' + esc(s.SessionID) + '</div>';
+  return { html: mailShell(T, inner, codes.length + ' items packed by ' + packers + (typed.length ? '. ' + typed.length + ' typed in by hand.' : '')), count: codes.length };
+}
+
+/** Report when a shoot is closed: missing first, then damaged, extra and back, with who handled each item. */
+function reportHtml(s, m, sum, T, full) {
+  var num = function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); };
+  var packed = Object.keys(sum.packed).sort(num);
+  var back = packed.filter(function (k) { return sum.back[k]; });
+  var missing = packed.filter(function (k) { return !sum.back[k]; });
+  var extra = Object.keys(sum.extra).sort(num);
+  var dmg = Object.keys(sum.damaged).sort(num);
+  var typed = Object.keys(sum.typed).sort(num);
+  var closed = s.ClosedAt ? Utilities.formatDate(new Date(s.ClosedAt), 'Asia/Dubai', 'EEE d MMM, HH:mm') : '';
+  function tile(n, label, color) {
+    return '<td width="20%" align="center" style="padding:18px 2px 16px"><div style="font-size:24px;line-height:1.1;font-weight:bold;color:' + color + '">' + n + '</div><div style="font-size:12px;margin-top:6px;color:' + T.muted + '">' + label + '</div></td>';
+  }
+  var inner = mailHead(T, missing.length ? 'SHOOT CLOSED · ' + missing.length + ' MISSING' : 'SHOOT CLOSED · ALL BACK', missing.length ? T.red : T.violet, s.ShootName,
+    'Closed by ' + esc(nameOf(s.ClosedBy)) + ' · ' + closed + '<br>Shoot ' + dateOnly(s.ShootDate) + ' · Team: ' + esc(teamNames(s))) +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + T.card + '" style="background:' + T.card + ';border-radius:16px"><tr>' +
+    tile(packed.length, 'packed', T.text) + tile(back.length, 'back', T.violet) + tile(missing.length, 'missing', missing.length ? T.red : T.muted) +
+    tile(dmg.length, 'damaged', dmg.length ? T.red : T.muted) + tile(extra.length, 'extra', T.muted) + '</tr></table>' +
+    '';
+  if (missing.length) inner += mailSection(T, 'Missing', T.red, missing.length) + mailItems(T, m, missing, T.red, function (k) { return whoLine('packed by', sum.packed[k]); });
+  if (dmg.length) inner += mailSection(T, 'Damaged', T.red, dmg.length) + mailItems(T, m, dmg, T.red, function (k) { return { note: String(sum.damaged[k]).replace(/\s*\(by [^)]*\)/, ''), who: sum.damagedBy[k] ? nameOf(sum.damagedBy[k]) : '' }; });
+  if (extra.length) inner += mailSection(T, 'Extra, not packed for this shoot', null, extra.length) + mailItems(T, m, extra, T.muted, function (k) { return whoLine('found by', sum.extra[k]); });
+  var typedBack = back.filter(function (k) { return sum.back[k].typed; });
+  if (typedBack.length && !full) inner += mailSection(T, 'Typed in at check back', T.yellow, typedBack.length) + mailItems(T, m, typedBack, T.yellow, function (k) { return whoLine('', sum.back[k]); });
+  if (full) inner += mailSection(T, 'Back', T.violet, back.length) + mailItems(T, m, back, T.violet, function (k) { return whoLine('', sum.back[k]); });
+  else inner += '<div style="background:' + T.card + ';border-radius:16px;padding:14px 16px;margin:28px 0 0;font-size:14px;line-height:1.5;color:' + T.muted + '"><b style="color:' + T.violet + '">' + back.length + ' of ' + packed.length + ' back.</b> The full list with who checked each item back is in the attached PDF.</div>';
+  inner += '<div style="color:' + T.muted + ';opacity:.6;font-size:11px;margin:36px 4px 0">EyeStudio Equipment Tracker · Shoot ' + esc(s.SessionID) + '</div>';
+  return mailShell(T, inner, (missing.length ? missing.length + ' missing' : 'All back') + '. ' + back.length + ' of ' + packed.length + ' back' + (dmg.length ? ', ' + dmg.length + ' damaged' : '') + (extra.length ? ', ' + extra.length + ' extra' : '') + '. Closed by ' + nameOf(s.ClosedBy) + '.');
+}
+
+function sendPackedEmail(s, items, scans, me) {
+  var e = packedEmailHtml(s, itemMap(items), sessionSummary(s, scans), me);
+  MailApp.sendEmail({ to: ADMIN_EMAIL, cc: teamCc(s), subject: 'Gear out · ' + s.ShootName + ' · ' + e.count + ' items', htmlBody: e.html, name: 'EyeStudio Equipment Tracker' });
 }
